@@ -18,6 +18,9 @@ export const buildCommonLocators = (frame: FrameLike) => ({
         .getByTestId('sidebar-collection-row'),
     collectionItem: (name: string) =>
       frame.getByTestId('sidebar-collection-item-row').filter({ hasText: name }),
+    collectionActions: (name: string) =>
+      frame.getByTestId('sidebar-collection-row').filter({ hasText: name }).getByTestId('collection-actions'),
+    runMenuItem: () => frame.getByTestId('collection-actions-run'),
     folderChevron: () => frame.getByTestId('folder-chevron'),
     addMenu: () => frame.getByTestId('collections-header-add-menu'),
     addMenuCreate: () => frame.getByTestId('collections-header-add-menu-create'),
@@ -55,6 +58,30 @@ export const buildCommonLocators = (frame: FrameLike) => ({
     requestsInfo: () => frame.getByTestId('collection-requests-count'),
     requestsNotLoaded: () => frame.getByTestId('collection-requests-not-loaded'),
     saveButton: () => frame.getByTestId('collection-settings-save')
+  },
+  runner: {
+    runCollection: () => frame.getByRole('button', { name: 'Run Collection' }),
+    // Enabled only — the button is visible but disabled while requests are still loading.
+    runCollectionReady: () => frame.getByRole('button', { name: 'Run Collection', disabled: false }),
+    runAgain: () => frame.getByRole('button', { name: 'Run Again' }),
+    delayInput: () => frame.getByRole('spinbutton'),
+    filterByTags: () => frame.getByLabel('Filter requests with tags'),
+    // Both fields share data-testid="tag-input". Scope each one to its label so the id resolves to one element.
+    includeTagInput: () =>
+      frame.getByText('Included tags:', { exact: true }).locator('..').getByTestId('tag-input'),
+    excludeTagInput: () =>
+      frame.getByText('Excluded tags:', { exact: true }).locator('..').getByTestId('tag-input'),
+    // Request Settings has a single tag field, so the id is unique there.
+    requestTagInput: () => frame.getByTestId('tag-input'),
+    // CodeMirror's hint list has no role or test id.
+    tagSuggestions: () => frame.locator('.CodeMirror-hints'),
+    tagChip: (tag: string) => frame.getByRole('button', { name: tag }),
+    savedToast: () => frame.getByText('Request saved successfully'),
+    requestCount: () => frame.getByText(/requests in this collection/),
+    // Result row has no test id; the name and status sit together in this block.
+    result: (name: string) => frame.locator('.item-path').filter({ hasText: name }),
+    filter: (label: 'All' | 'Passed' | 'Failed' | 'Skipped') =>
+      frame.getByRole('button', { name: label })
   },
   environments: {
     // Environment picker in the collection toolbar.

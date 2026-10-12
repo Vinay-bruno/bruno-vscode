@@ -2534,28 +2534,27 @@ export const saveCollectionSettings = (collectionUid: any, brunoConfig: Record<s
     const collectionRootToSave = transformCollectionRootToSave(collectionCopy);
     const { ipcRenderer } = window;
 
-    const savePromises = [];
-
     const brunoConfigToSave = brunoConfig || (collectionCopy.draft && collectionCopy.draft.brunoConfig);
 
-    if (isYmlCollection(collectionCopy)) {
-      savePromises.push(
-        ipcRenderer.invoke(
+    const save = async () => {
+      if (isYmlCollection(collectionCopy)) {
+        await ipcRenderer.invoke(
           'renderer:save-collection-root',
           collectionCopy.pathname,
           collectionRootToSave,
           brunoConfigToSave || collectionCopy.brunoConfig
-        )
-      );
-    } else {
-      savePromises.push(ipcRenderer.invoke('renderer:save-collection-root', collectionCopy.pathname, collectionRootToSave, collectionCopy.brunoConfig));
+        );
+        return;
+      }
+
+      await ipcRenderer.invoke('renderer:save-collection-root', collectionCopy.pathname, collectionRootToSave, collectionCopy.brunoConfig);
 
       if (brunoConfigToSave) {
-        savePromises.push(ipcRenderer.invoke('renderer:update-bruno-config', brunoConfigToSave, collectionCopy.pathname, collectionRootToSave));
+        await ipcRenderer.invoke('renderer:update-bruno-config', brunoConfigToSave, collectionCopy.pathname, collectionRootToSave);
       }
-    }
+    };
 
-    Promise.all(savePromises)
+    save()
       .then(() => {
         if (!silent) {
           toast.success('Collection Settings saved successfully');
@@ -2759,18 +2758,19 @@ export const collectionAddEnvFileEvent = (payload: any) => (dispatch: any, getSt
       return reject(new Error('Collection not found'));
     }
 
-    environmentSchema
-      .validate(environment)
-      .then(() =>
-        dispatch(
-          _collectionAddEnvFileEvent({
-            environment,
-            collectionUid: meta.collectionUid
-          })
-        )
-      )
-      .then(resolve)
-      .catch(reject);
+    // Validate synchronously so the environment is in the store before any following event is handled
+    try {
+      environmentSchema.validateSync(environment);
+      dispatch(
+        _collectionAddEnvFileEvent({
+          environment,
+          collectionUid: meta.collectionUid
+        })
+      );
+      resolve(undefined);
+    } catch (error) {
+      reject(error);
+    }
   });
 };
 
@@ -2782,18 +2782,21 @@ export const importCollection = (collection: any, collectionLocation: any, optio
       const state = getState();
       const activeWorkspace = state.workspaces.workspaces.find((w: any) => w.uid === state.workspaces.activeWorkspaceUid);
 
-      const collectionPath = await ipcRenderer.invoke('renderer:import-collection', collection, collectionLocation, options.format || 'yml');
+      const result = await ipcRenderer.invoke('renderer:import-collection', collection, collectionLocation, options.format || 'yml') as {
+        success: { items: Array<{ name: string; path: string }> };
+      };
+      const importedItems = result.success.items;
 
       if (activeWorkspace && activeWorkspace.pathname && activeWorkspace.type !== 'default') {
-        const workspaceCollection = {
-          name: collection.name,
-          path: collectionPath
-        };
-
-        await ipcRenderer.invoke('renderer:add-collection-to-workspace', activeWorkspace.pathname, workspaceCollection);
+        for (const importedItem of importedItems) {
+          await ipcRenderer.invoke('renderer:add-collection-to-workspace', activeWorkspace.pathname, {
+            name: importedItem.name,
+            path: importedItem.path
+          });
+        }
       }
 
-      resolve(collectionPath);
+      resolve(Array.isArray(collection) ? importedItems.map((item) => item.path) : importedItems[0]?.path);
     } catch (error) {
       reject(error);
     }

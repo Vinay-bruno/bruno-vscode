@@ -20,6 +20,7 @@ const AUTHORIZATION_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
 
 let pendingAuthResolve: ((value: AuthorizationResult) => void) | null = null;
 let pendingAuthReject: ((reason: Error) => void) | null = null;
+let expectedState: string | null = null;
 let authTimeoutHandle: ReturnType<typeof setTimeout> | null = null;
 let localServer: http.Server | null = null;
 
@@ -28,15 +29,13 @@ export function isAuthorizationInProgress(): boolean {
 }
 
 export function cancelAuthorization(): void {
-  cleanup();
-  if (pendingAuthReject) {
-    pendingAuthReject(new Error('Authorization was cancelled by user'));
-    pendingAuthResolve = null;
-    pendingAuthReject = null;
-  }
+  settleReject(new Error('Authorization was cancelled by user'));
 }
 
 function cleanup(): void {
+  expectedState = null;
+  pendingAuthResolve = null;
+  pendingAuthReject = null;
   if (authTimeoutHandle) {
     clearTimeout(authTimeoutHandle);
     authTimeoutHandle = null;
@@ -45,6 +44,19 @@ function cleanup(): void {
     localServer.close();
     localServer = null;
   }
+}
+
+// Capture the pending callback before cleanup() clears it, then settle.
+function settleResolve(result: AuthorizationResult): void {
+  const resolve = pendingAuthResolve;
+  cleanup();
+  resolve?.(result);
+}
+
+function settleReject(error: Error): void {
+  const reject = pendingAuthReject;
+  cleanup();
+  reject?.(error);
 }
 
 // --- URI handler for authorization code callback ---
@@ -58,27 +70,27 @@ export function createOAuth2UriHandler(): vscode.UriHandler {
       const error = params.get('error');
       if (error) {
         const desc = params.get('error_description') || error;
-        cleanup();
-        pendingAuthReject?.(new Error(`OAuth2 authorization error: ${desc}`));
-        pendingAuthResolve = null;
-        pendingAuthReject = null;
+        settleReject(new Error(`OAuth2 authorization error: ${desc}`));
+        return;
+      }
+
+      // Validate state to protect against CSRF / authorization code injection.
+      const returnedState = params.get('state') || new URLSearchParams(uri.fragment).get('state');
+      if (!expectedState || returnedState !== expectedState) {
+        settleReject(new Error('OAuth2 state mismatch: the returned state does not match the issued state.'));
         return;
       }
 
       const code = params.get('code');
       if (code) {
-        cleanup();
-        pendingAuthResolve({ authorizationCode: code });
-        pendingAuthResolve = null;
-        pendingAuthReject = null;
+        settleResolve({ authorizationCode: code, callbackUri: uri.toString(true) });
         return;
       }
 
       // For implicit flow via URI handler (unlikely since fragments aren't forwarded)
       const accessToken = params.get('access_token');
       if (accessToken) {
-        cleanup();
-        pendingAuthResolve({
+        settleResolve({
           implicitTokens: {
             access_token: accessToken,
             token_type: params.get('token_type') || 'Bearer',
@@ -87,8 +99,6 @@ export function createOAuth2UriHandler(): vscode.UriHandler {
             state: params.get('state') || undefined
           }
         });
-        pendingAuthResolve = null;
-        pendingAuthReject = null;
       }
     }
   };
@@ -98,6 +108,8 @@ export function createOAuth2UriHandler(): vscode.UriHandler {
 
 export interface AuthorizationResult {
   authorizationCode?: string;
+  authorizeUrl?: string;
+  callbackUri?: string;
   implicitTokens?: {
     access_token: string;
     token_type: string;
@@ -161,7 +173,7 @@ export async function getOAuth2AuthorizationCode(options: AuthorizationCodeOptio
     });
   }
 
-  return openBrowserAndWaitForCallback(url.toString());
+  return openBrowserAndWaitForCallback(url.toString(), state);
 }
 
 export async function getOAuth2ImplicitToken(options: ImplicitFlowOptions): Promise<AuthorizationResult> {
@@ -193,27 +205,22 @@ export async function getOAuth2ImplicitToken(options: ImplicitFlowOptions): Prom
     });
   }
 
-  return openBrowserAndWaitForCallback(url.toString());
+  return openBrowserAndWaitForCallback(url.toString(), state);
 }
 
-async function openBrowserAndWaitForCallback(authorizeUrl: string): Promise<AuthorizationResult> {
+async function openBrowserAndWaitForCallback(authorizeUrl: string, state?: string): Promise<AuthorizationResult> {
   return new Promise<AuthorizationResult>((resolve, reject) => {
-    pendingAuthResolve = resolve;
+    pendingAuthResolve = (result) => resolve({ ...result, authorizeUrl });
     pendingAuthReject = reject;
+    expectedState = state || null;
 
     authTimeoutHandle = setTimeout(() => {
-      cleanup();
-      pendingAuthResolve = null;
-      pendingAuthReject = null;
-      reject(new Error('OAuth2 authorization timed out after 5 minutes'));
+      settleReject(new Error('OAuth2 authorization timed out after 5 minutes'));
     }, AUTHORIZATION_TIMEOUT_MS);
 
     vscode.env.openExternal(vscode.Uri.parse(authorizeUrl)).then((opened) => {
       if (!opened) {
-        cleanup();
-        pendingAuthResolve = null;
-        pendingAuthReject = null;
-        reject(new Error('Failed to open authorization URL in system browser'));
+        settleReject(new Error('Failed to open authorization URL in system browser'));
       }
     });
   });

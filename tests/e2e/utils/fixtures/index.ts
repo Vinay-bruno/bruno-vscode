@@ -6,6 +6,7 @@ import * as os from 'os';
 import * as fs from 'fs';
 import * as path from 'path';
 import { runCommand } from '../page/actions';
+import { CA_CERT } from '../../ssl/client-certificate/server/mtls-certs';
 
 // This file lives at tests/e2e/utils/fixtures/, so climb four levels to the repo root.
 const EXTENSION_ROOT = path.resolve(__dirname, '../../../..');
@@ -17,6 +18,10 @@ export interface VSCodeFixture {
   context: BrowserContext;
   /** Temp directory for storing test collections — cleaned up automatically */
   tmpDir: string;
+}
+
+export interface VSCodeOptions {
+  vscodeSettings: Record<string, unknown>;
 }
 
 async function getFreePort(): Promise<number> {
@@ -89,12 +94,13 @@ async function resolveExecutable(): Promise<string> {
 }
 
 /** Write VS Code user settings to suppress welcome/trust dialogs and speed up startup */
-function writeVSCodeSettings(userDataDir: string): void {
+function writeVSCodeSettings(userDataDir: string, extraSettings: Record<string, unknown> = {}): void {
   const userDir = path.join(userDataDir, 'User');
   fs.mkdirSync(userDir, { recursive: true });
   fs.writeFileSync(
     path.join(userDir, 'settings.json'),
     JSON.stringify({
+      'window.newWindowDimensions': 'maximized',
       'workbench.startupEditor': 'none',
       'update.mode': 'none',
       'extensions.autoCheckUpdates': false,
@@ -109,6 +115,7 @@ function writeVSCodeSettings(userDataDir: string): void {
       'workbench.welcomePage.walkthroughs.openOnInstall': false,
       'workbench.accounts.experimental.showEntitlements': false,
       'accessibility.signUpPlaceholder': false,
+      ...extraSettings,
     }, null, 2)
   );
 }
@@ -131,7 +138,10 @@ function launchVSCode(
     workspacePath,
   ];
 
-  const proc = spawn(executablePath, args, { detached: false });
+  const proc = spawn(executablePath, args, {
+    detached: false,
+    env: { ...process.env, NODE_EXTRA_CA_CERTS: CA_CERT }
+  });
   // Only log errors to avoid noise
   proc.stderr?.on('data', d => {
     const line = String(d);
@@ -183,15 +193,17 @@ async function waitForWorkbench(page: Page): Promise<void> {
   await new Promise(r => setTimeout(r, 2_000));
 }
 
-export const test = base.extend<VSCodeFixture>({
-  page: async ({}, use) => {
+export const test = base.extend<VSCodeFixture & VSCodeOptions>({
+  vscodeSettings: [{}, { option: true }],
+
+  page: async ({ vscodeSettings }, use) => {
     const debugPort = await getFreePort();
     const userDataDir = makeTempDir('bruno-vscode-test-');
 
     // Create a temp workspace folder so the extension host has a workspace to run against
     const workspacePath = makeTempDir('bruno-workspace-');
 
-    writeVSCodeSettings(userDataDir);
+    writeVSCodeSettings(userDataDir, vscodeSettings);
 
     const executablePath = await resolveExecutable();
     const proc = launchVSCode(executablePath, debugPort, userDataDir, workspacePath);

@@ -2,6 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { Page, Frame, Locator, expect } from '@playwright/test';
 import { buildCommonLocators } from './locators';
+import { GRPC_SERVER_URL } from '../urls';
 
 /**
  * Locate the collection directory created under a test's tmpDir.
@@ -25,6 +26,17 @@ export function findCollectionDir(
     }
   }
   throw new Error(`No collection (${configFile}) found under ${root}`);
+}
+
+/** Recursively return paths of every file under `dir` whose name matches `fileName`. */
+export function findFilesWithName(dir: string, fileName: string): string[] {
+  const matches: string[] = [];
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    const full = path.join(dir, entry.name);
+    if (entry.isDirectory()) matches.push(...findFilesWithName(full, fileName));
+    else if (entry.name === fileName) matches.push(full);
+  }
+  return matches;
 }
 
 // Find the webview Frame that contains the given marker selector.
@@ -90,19 +102,22 @@ export async function openBrunoSidebar(page: Page): Promise<Frame> {
  * We temporarily intercept that single call so the native file-picker
  * dialog is bypassed and the value flows through Formik's `setFieldValue`.
  */
-async function mockBrowseDirectory(frame: Frame, dirPath: string): Promise<void> {
-  await frame.evaluate((val) => {
+async function mockIpcInvoke(frame: Frame, channelName: string, dirPath: string): Promise<void> {
+  await frame.evaluate(({ channelName, dirPath }) => {
     const ipc = (window as any).ipcRenderer;
     const originalInvoke = ipc.invoke.bind(ipc);
     ipc.invoke = async (channel: string, ...args: any[]) => {
-      if (channel === 'renderer:browse-directory') {
-        // Restore after one use
+      if (channel === channelName) {
         ipc.invoke = originalInvoke;
-        return val;
+        return dirPath;
       }
       return originalInvoke(channel, ...args);
     };
-  }, dirPath);
+  }, { channelName, dirPath });
+}
+
+export async function mockBrowseDirectory(frame: Frame, dirPath: string): Promise<void> {
+  await mockIpcInvoke(frame, 'renderer:browse-directory', dirPath);
 }
 
 /**
@@ -159,6 +174,57 @@ export async function createCollection(
   ).toBeVisible({ timeout: 15_000 });
 }
 
+export async function openImportPanelWithFiles(
+  page: Page,
+  sidebar: Frame,
+  filePaths: string[]
+): Promise<Frame> {
+  const sidebarLoc = buildCommonLocators(sidebar);
+  await sidebarLoc.sidebar.addMenu().click();
+  await sidebarLoc.sidebar.addMenuImport().click();
+
+  const editor = await waitForNewWebviewFrame(page, sidebar);
+  const importPanel = buildCommonLocators(editor).importCollection;
+  await expect(importPanel.container()).toBeVisible();
+
+  await importPanel.fileInput().setInputFiles(filePaths);
+  return editor;
+}
+
+/**
+ * Clone a collection from the sidebar ellipse menu.
+ * The clone panel names the copy "<source> copy" and asks for a parent folder.
+ */
+export async function cloneCollection(
+  page: Page,
+  sidebar: Frame,
+  sourceName: string,
+  location: string,
+  cloneSuffix: string = ' copy'
+): Promise<string> {
+  const cloneName = `${sourceName}${cloneSuffix}`;
+  const sidebarLocators = buildCommonLocators(sidebar);
+  const collectionRow = sidebarLocators.sidebar.collectionName(sourceName);
+  await collectionRow.hover();
+  await buildCommonLocators(collectionRow).sidebar.actionsMenu().click();
+  await sidebarLocators.sidebar.actionsItem('clone').click();
+
+  const editor = await waitForNewWebviewFrame(page, sidebar);
+  const cloneForm = buildCommonLocators(editor).cloneCollection;
+  await expect(cloneForm.container()).toBeVisible();
+  await expect(cloneForm.nameInput()).toHaveValue(cloneName);
+
+  await mockIpcInvoke(editor, 'clone-collection:browse-location', location);
+  await cloneForm.browseButton().click();
+  await expect(cloneForm.locationInput()).toHaveValue(location);
+
+  await cloneForm.submit().click();
+
+  await expect(sidebarLocators.sidebar.collectionName(cloneName)).toBeVisible();
+
+  return cloneName;
+}
+
 /**
  * Import a collection from a JSON file using the Bruno import flow.
  *
@@ -171,41 +237,69 @@ export async function createCollection(
  * @param filePath - Absolute path to the collection JSON file
  * @param location - Filesystem path where the imported collection will be stored
  * @param expectedName - Expected collection name to verify in the sidebar
+ * @param format - On-disk format chosen on the location step: 'yml' (default) or 'bru'
  */
 export async function importCollection(
   page: Page,
   sidebar: Frame,
   filePath: string,
   location: string,
-  expectedName: string
+  expectedName: string,
+  format: 'yml' | 'bru' = 'yml'
 ): Promise<void> {
-  // Open the "+" dropdown and click "Import collection"
-  await sidebar.locator('[data-testid="collections-header-add-menu"]').click();
-  await sidebar.locator('[data-testid="collections-header-add-menu-import"]').click();
-
-  // The import opens a new WebviewPanel — wait for its frame to appear.
-  const editor = await waitForNewWebviewFrame(page, sidebar);
-  await expect(editor.locator('.import-collection-container')).toBeVisible({ timeout: 15_000 });
-
-  // Step 1: Select the file via the hidden file input
-  await editor.locator('input[type="file"]').setInputFiles(filePath);
+  const editor = await openImportPanelWithFiles(page, sidebar, [filePath]);
+  const importPanel = buildCommonLocators(editor).importCollection;
 
   // Step 2: The location step should now be visible (form with location input)
-  await expect(editor.locator('#collectionLocation')).toBeVisible({ timeout: 10_000 });
+  await expect(importPanel.location()).toBeVisible({ timeout: 10_000 });
 
   // The location input is readonly and opens a native file dialog via IPC.
   // Mock the IPC call to return our path, then click Browse.
   await mockBrowseDirectory(editor, location);
-  await editor.locator('.browse-button').click();
-  await expect(editor.locator('#collectionLocation')).toHaveValue(location, { timeout: 5_000 });
+  await importPanel.browse().click();
+  await expect(importPanel.location()).toHaveValue(location, { timeout: 5_000 });
+
+  if (format !== 'yml') {
+    await editor.locator('#format').selectOption(format);
+  }
 
   // Click Import
-  await editor.locator('button[type="submit"]').filter({ hasText: 'Import' }).click();
+  await importPanel.submit().click();
 
   // Wait for the collection to appear in the sidebar
   await expect(
-    sidebar.locator('[data-testid="sidebar-collection-row"]').filter({ hasText: expectedName })
+    buildCommonLocators(sidebar).sidebar.collectionName(expectedName)
   ).toBeVisible({ timeout: 20_000 });
+}
+
+export async function importMultipleCollections(
+  page: Page,
+  sidebar: Frame,
+  filePaths: string[],
+  location: string,
+  expectedNames: string[]
+): Promise<Frame> {
+  const editor = await openImportPanelWithFiles(page, sidebar, filePaths);
+  const importPanel = buildCommonLocators(editor).importCollection;
+
+  await expect(importPanel.rows()).toHaveCount(filePaths.length);
+  await expect(importPanel.selectedCount()).toHaveText(`${filePaths.length} of ${filePaths.length} selected`);
+
+  await mockBrowseDirectory(editor, location);
+  await importPanel.browse().click();
+  await expect(importPanel.location()).toHaveValue(location);
+
+  await importPanel.submit().click();
+
+  await expect(importPanel.progressSummary()).toHaveText(`${filePaths.length} of ${filePaths.length} collections imported`);
+  await expect(importPanel.close()).toBeEnabled();
+
+  const sidebarLoc = buildCommonLocators(sidebar);
+  for (const name of expectedNames) {
+    await expect(sidebarLoc.sidebar.collectionName(name)).toBeVisible();
+  }
+
+  return editor;
 }
 
 /**
@@ -236,6 +330,50 @@ export async function openNewRequestPanel(
   await expect(editor.locator('.new-request-container')).toBeVisible({ timeout: 15_000 });
 
   return editor;
+}
+
+/**
+ * Create a transient request from the collection row's "+" menu
+ * and return its panel Frame.
+ */
+export async function openTransientRequest(
+  page: Page,
+  sidebar: Frame,
+  collectionName: string,
+  type: 'HTTP' | 'GraphQL' | 'gRPC' | 'WebSocket' = 'HTTP'
+): Promise<Frame> {
+  const menuType = ({ HTTP: 'http', GraphQL: 'graphql', gRPC: 'grpc', WebSocket: 'ws' } as const)[type];
+  const marker = (frame: Frame) => {
+    const ui = buildCommonLocators(frame);
+    if (type === 'WebSocket') return ui.ws.connectButton();
+    if (type === 'gRPC') return ui.grpc.queryUrlContainer();
+    return ui.requestUrl.editor();
+  };
+
+  await createTransientRequest(sidebar, collectionName, menuType);
+
+  const editor = await getWebviewFrame(page, marker, sidebar);
+  await expect(marker(editor)).toBeVisible({ timeout: 10_000 });
+
+  return editor;
+}
+
+/**
+ * Pick an environment from the collection toolbar's environment selector.
+ */
+export async function selectEnvironment(frame: Frame, name: string | null): Promise<void> {
+  const env = buildCommonLocators(frame).environments;
+  await env.selectorTrigger().click();
+
+  const option = name ? env.dropdownItem(name) : env.noEnvironmentOption();
+  await expect(option).toBeVisible();
+  await option.click();
+
+  if (name) {
+    await expect(env.activeName()).toHaveText(name);
+  } else {
+    await expect(env.inactiveLabel()).toBeVisible();
+  }
 }
 
 /**
@@ -520,6 +658,24 @@ export async function loadGrpcProtoFile(editor: Frame, protoAbsPath: string): Pr
   await expect(grpc.methodDropdownTrigger()).toBeVisible({ timeout: 15_000 });
 }
 
+export async function createGrpcRequestWithProto(
+  page: Page,
+  sidebar: Frame,
+  collectionName: string,
+  options: { name: string; protoFixture: string; targetDir: string; url?: string }
+): Promise<Frame> {
+  const { name, protoFixture, targetDir, url = GRPC_SERVER_URL } = options;
+
+  const protoInCollection = path.join(targetDir, protoFixture);
+  fs.copyFileSync(path.resolve(__dirname, '../fixtures', protoFixture), protoInCollection);
+
+  await createRequestByType(page, sidebar, collectionName, { name, url, type: 'gRPC' });
+  const editor = await openGrpcRequest(page, sidebar, collectionName, name);
+
+  await loadGrpcProtoFile(editor, protoInCollection);
+  return editor;
+}
+
 /** Select a gRPC method by (partial) name from the method dropdown. */
 export async function selectGrpcMethod(editor: Frame, methodText: string): Promise<void> {
   const grpc = buildCommonLocators(editor).grpc;
@@ -566,6 +722,30 @@ export async function expandCollection(
   if (!isExpanded) {
     await chevron.click();
   }
+}
+
+export async function expandFolder(sidebar: Frame, folderName: string): Promise<void> {
+  const folderRow = buildCommonLocators(sidebar).sidebar.collectionItem(folderName);
+  const chevron = buildCommonLocators(folderRow).sidebar.folderChevron();
+  const isExpanded = await chevron.evaluate((el) => el.classList.contains('rotate-90'));
+  if (!isExpanded) {
+    await chevron.click();
+  }
+}
+
+export async function dragItemIntoFolder(
+  sidebar: Frame,
+  itemName: string,
+  folderName: string
+): Promise<void> {
+  const locators = buildCommonLocators(sidebar);
+  const itemRow = locators.sidebar.collectionItem(itemName);
+  const folderRow = locators.sidebar.collectionItem(folderName);
+  await expect(itemRow).toBeVisible();
+  await expect(folderRow).toBeVisible();
+
+  // steps gives the sidebar a real drag; a single jump does not start one.
+  await itemRow.locator('.item-name').dragTo(folderRow, { steps: 15 });
 }
 
 /**
@@ -661,8 +841,17 @@ async function openRequestByMarker(
   // Click the request to open it in the editor
   await requestRow.click();
 
-  // Wait for the request editor frame — identified by the marker selector.
-  const editor = await getWebviewFrame(page, (frame) => frame.locator(markerSelector), sidebar);
+  return waitForFrameWithMarker(page, sidebar, markerSelector);
+}
+
+// Wait for the request editor frame — identified by the marker selector.
+async function waitForFrameWithMarker(
+  page: Page,
+  excludeFrame: Frame,
+  markerSelector: string,
+  timeout = 20_000
+): Promise<Frame> {
+  const editor = await getWebviewFrame(page, (frame) => frame.locator(markerSelector), excludeFrame, timeout);
   await expect(editor.locator(markerSelector)).toBeVisible({ timeout: 10_000 });
 
   return editor;
@@ -768,6 +957,12 @@ export async function addRequestTag(
   await typeRunnerTag(page, editor, locators.requestTagInput(), tag);
   await runCommand(page, 'Bruno: Save Request');
   await locators.savedToast().waitFor({ state: 'visible', timeout: 10_000 });
+}
+export async function openEnvironmentsTab(page: Page, from: Frame): Promise<Frame> {
+  const environments = buildCommonLocators(from).environments;
+  await environments.selectorTrigger().click();
+  await environments.configureButton().click();
+  return getWebviewFrame(page, (frame) => buildCommonLocators(frame).environments.settingsList(), from);
 }
 
 export async function addCollectionHeader(

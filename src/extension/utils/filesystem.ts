@@ -172,7 +172,10 @@ export const browseDirectory = async (): Promise<string | false> => {
   return isDirectory(resolvedPath) ? resolvedPath : false;
 };
 
-export const browseFiles = async (filters?: { name: string; extensions: string[] }[]): Promise<string[]> => {
+export const browseFiles = async (
+  filters?: { name: string; extensions: string[] }[],
+  properties?: string[]
+): Promise<string[]> => {
   const vscodeFilters: { [key: string]: string[] } = {};
   if (filters) {
     for (const filter of filters) {
@@ -183,7 +186,7 @@ export const browseFiles = async (filters?: { name: string; extensions: string[]
   const uris = await vscode.window.showOpenDialog({
     canSelectFiles: true,
     canSelectFolders: false,
-    canSelectMany: true,
+    canSelectMany: properties?.includes('multiSelections') ?? false,
     filters: vscodeFilters
   });
 
@@ -268,6 +271,21 @@ export const generateUniqueName = (baseName: string, checkExists: (name: string)
     uniqueName = `${baseName} copy ${counter}`;
   }
   return uniqueName;
+};
+
+export const makeFolderNameUnique = (baseName: string, parentDir: string): string => {
+  const isTaken = (folderName: string): boolean => {
+    const dirPath = path.join(parentDir, folderName);
+    return fs.existsSync(dirPath) && fs.readdirSync(dirPath).length > 0;
+  };
+
+  let counter = 0;
+  let folderName = baseName;
+  while (isTaken(folderName)) {
+    counter++;
+    folderName = `${baseName} - ${counter}`;
+  }
+  return folderName;
 };
 
 export const validateName = (name: string): boolean => {

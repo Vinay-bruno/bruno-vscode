@@ -115,8 +115,10 @@ const HttpRequestPane = ({
   }, [activeCounts, body.mode, auth.mode, script, item.preRequestScriptErrorMessage, item.postResponseScriptErrorMessage, item.testScriptErrorMessage, tests, docs, tags]);
 
   const allTabs = useMemo(
-    () => TAB_CONFIG.map(({ key, label }) => ({ key, label, indicator: indicators[key] })),
-    [indicators]
+    () => (appEnabled
+      ? TAB_CONFIG.map(({ key, label }) => ({ key, label, indicator: indicators[key] }))
+      : TAB_CONFIG.filter(({ key }) => key !== 'app').map(({ key, label }) => ({ key, label, indicator: indicators[key] }))),
+    [indicators, appEnabled]
   );
 
   const tabPanel = useMemo(() => {
@@ -139,7 +141,7 @@ const HttpRequestPane = ({
   ) : null;
 
   return (
-    <div className="flex flex-col h-full relative">
+    <div className="flex flex-col h-full relative" data-testid="request-pane">
       <ResponsiveTabs
         tabs={allTabs}
         activeTab={requestPaneTab}

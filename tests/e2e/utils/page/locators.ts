@@ -46,6 +46,9 @@ export const buildCommonLocators = (frame: FrameLike) => ({
     browseButton: () => frame.locator('.browse-btn'),
     submit: () => frame.locator('button[type="submit"]').filter({ hasText: 'Clone Collection' })
   },
+    collectionActions: (name: string) =>
+      frame.getByTestId('sidebar-collection-row').filter({ hasText: name }).getByTestId('collection-actions'),
+    runMenuItem: () => frame.getByTestId('collection-actions-run'),
   collectionSettings: {
     container: () => frame.getByTestId('collection-settings'),
     // Overview → Requests line, e.g. "2 requests in collection".
@@ -83,19 +86,27 @@ export const buildCommonLocators = (frame: FrameLike) => ({
   // Collection runner panel (empty state, then results after a run).
   runner: {
     runCollection: () => frame.getByRole('button', { name: 'Run Collection' }),
+    // Enabled only — the button is visible but disabled while requests are still loading.
+    runCollectionReady: () => frame.getByRole('button', { name: 'Run Collection', disabled: false }),
     runAgain: () => frame.getByRole('button', { name: 'Run Again' }),
-    // "Delay (in ms)" on the empty runner state. The label is not tied to the input.
-    delayInput: () => frame.locator('input[type="number"]'),
+    delayInput: () => frame.getByRole('spinbutton'),
     filterByTags: () => frame.getByLabel('Filter requests with tags'),
-    // Include list is the first tag field; Exclude is the second.
-    includeTagInput: () => frame.getByTestId('tag-input').first(),
-    excludeTagInput: () => frame.getByTestId('tag-input').nth(1),
-    tagChip: (tag: string) => frame.locator('.tag-text').filter({ hasText: tag }),
-    // Empty state, e.g. "You have 1 requests in this collection."
+    // Both fields share data-testid="tag-input". Scope each one to its label so the id resolves to one element.
+    includeTagInput: () =>
+      frame.getByText('Included tags:', { exact: true }).locator('..').getByTestId('tag-input'),
+    excludeTagInput: () =>
+      frame.getByText('Excluded tags:', { exact: true }).locator('..').getByTestId('tag-input'),
+    // Request Settings has a single tag field, so the id is unique there.
+    requestTagInput: () => frame.getByTestId('tag-input'),
+    // CodeMirror's hint list has no role or test id.
+    tagSuggestions: () => frame.locator('.CodeMirror-hints'),
+    tagChip: (tag: string) => frame.getByRole('button', { name: tag }),
+    savedToast: () => frame.getByText('Request saved successfully'),
     requestCount: () => frame.getByText(/requests in this collection/),
+    // Result row has no test id; the name and status sit together in this block.
     result: (name: string) => frame.locator('.item-path').filter({ hasText: name }),
     filter: (label: 'All' | 'Passed' | 'Failed' | 'Skipped') =>
-      frame.locator('.filter-button').filter({ hasText: label })
+      frame.getByRole('button', { name: label })
   },
   requestUrl: {
     editor: () => frame.locator('#request-url'),

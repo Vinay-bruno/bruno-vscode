@@ -1,46 +1,16 @@
-import * as fs from 'fs';
-import * as path from 'path';
 import { test, expect } from '../../utils/fixtures';
 import {
-  openBrunoSidebar,
+  addRequestTag,
   createCollection,
   createRequestByType,
-  openCollectionRunner,
-  includeRunnerTag,
   excludeRunnerTag,
+  includeRunnerTag,
+  openBrunoSidebar,
+  openCollectionRunner,
   runCollection,
 } from '../../utils/page/actions';
 import { buildCommonLocators } from '../../utils/page/locators';
 import type { Frame } from '@playwright/test';
-
-/** Write `tag` into the request's `info` block so the runner loads it from disk. */
-function tagRequestFile(root: string, requestName: string, tag: string): void {
-  const stack = [root];
-  let requestFile: string | undefined;
-
-  while (stack.length) {
-    const dir = stack.pop() as string;
-    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-      const full = path.join(dir, entry.name);
-      if (entry.isDirectory()) {
-        stack.push(full);
-      } else if (entry.isFile() && entry.name.endsWith('.yml') && entry.name !== 'opencollection.yml') {
-        if (fs.readFileSync(full, 'utf8').includes(requestName)) requestFile = full;
-      }
-    }
-  }
-
-  if (!requestFile) throw new Error(`Request file for "${requestName}" not found under ${root}`);
-
-  const content = fs.readFileSync(requestFile, 'utf8');
-  const newline = content.includes('\r\n') ? '\r\n' : '\n';
-  const lines = content.split(/\r?\n/);
-  const nameIndex = lines.findIndex((line) => line.includes('name:') && line.includes(requestName));
-  if (nameIndex < 0) throw new Error(`name line for "${requestName}" not found in ${requestFile}`);
-
-  lines.splice(nameIndex + 1, 0, '  tags:', `    - ${tag}`);
-  fs.writeFileSync(requestFile, lines.join(newline));
-}
 
 const TEST_SERVER = 'http://127.0.0.1:8081';
 
@@ -149,7 +119,7 @@ test.describe('Collection runner', () => {
       });
       await expect(locators.sidebar.collectionItem(taggedRequest)).toBeVisible();
       await expect(locators.sidebar.collectionItem(plainRequest)).toBeVisible();
-      tagRequestFile(tmpDir, taggedRequest, tag);
+      await addRequestTag(page, sidebar, collectionName, taggedRequest, tag);
     });
 
     await test.step('Open the runner and include the tag', async () => {
@@ -192,7 +162,7 @@ test.describe('Collection runner', () => {
       });
       await expect(locators.sidebar.collectionItem(taggedRequest)).toBeVisible();
       await expect(locators.sidebar.collectionItem(plainRequest)).toBeVisible();
-      tagRequestFile(tmpDir, taggedRequest, tag);
+      await addRequestTag(page, sidebar, collectionName, taggedRequest, tag);
     });
 
     await test.step('Open the runner and exclude the tag', async () => {

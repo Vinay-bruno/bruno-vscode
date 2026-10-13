@@ -33,10 +33,10 @@ test.describe('Collection runner', () => {
     });
 
     const runner = await test.step('Open the runner from the collection ellipse menu', async () => {
-      const opened = await openCollectionRunner(page, sidebar, collectionName);
-      await expect(buildCommonLocators(opened).runner.runCollectionButton()).toBeEnabled();
-      await expect(buildCommonLocators(opened).runner.requestCountText()).toContainText('1');
-      return opened;
+      const runnerFrame = await openCollectionRunner(page, sidebar, collectionName);
+      await expect(buildCommonLocators(runnerFrame).runner.runCollectionButton()).toBeEnabled();
+      await expect(buildCommonLocators(runnerFrame).runner.requestCountText()).toContainText('1');
+      return runnerFrame;
     });
 
     await test.step('Run the collection and verify the request passed', async () => {
@@ -75,13 +75,13 @@ test.describe('Collection runner', () => {
     });
 
     const runner = await test.step('Open the runner and set the delay', async () => {
-      const opened = await openCollectionRunner(page, sidebar, collectionName);
-      const runnerLocators = buildCommonLocators(opened).runner;
+      const runnerFrame = await openCollectionRunner(page, sidebar, collectionName);
+      const runnerLocators = buildCommonLocators(runnerFrame).runner;
       await expect(runnerLocators.runCollectionButton()).toBeEnabled();
       await expect(runnerLocators.requestCountText()).toContainText('2');
       await runnerLocators.delayInput().fill(String(delayMs));
       await expect(runnerLocators.delayInput()).toHaveValue(String(delayMs));
-      return opened;
+      return runnerFrame;
     });
 
     await test.step('Run the collection and verify the delay is applied', async () => {
@@ -126,11 +126,11 @@ test.describe('Collection runner', () => {
     });
 
     const runner = await test.step('Open the runner and include the tag', async () => {
-      const opened = await openCollectionRunner(page, sidebar, collectionName);
-      await expect(buildCommonLocators(opened).runner.runCollectionButton()).toBeEnabled();
-      await expect(buildCommonLocators(opened).runner.requestCountText()).toContainText('2');
-      await includeRunnerTag(page, opened, tag);
-      return opened;
+      const runnerFrame = await openCollectionRunner(page, sidebar, collectionName);
+      await expect(buildCommonLocators(runnerFrame).runner.runCollectionButton()).toBeEnabled();
+      await expect(buildCommonLocators(runnerFrame).runner.requestCountText()).toContainText('2');
+      await includeRunnerTag(page, runnerFrame, tag);
+      return runnerFrame;
     });
 
     await test.step('Run and verify only the tagged request is executed', async () => {
@@ -172,11 +172,11 @@ test.describe('Collection runner', () => {
     });
 
     const runner = await test.step('Open the runner and exclude the tag', async () => {
-      const opened = await openCollectionRunner(page, sidebar, collectionName);
-      await expect(buildCommonLocators(opened).runner.runCollectionButton()).toBeEnabled();
-      await expect(buildCommonLocators(opened).runner.requestCountText()).toContainText('2');
-      await excludeRunnerTag(page, opened, tag);
-      return opened;
+      const runnerFrame = await openCollectionRunner(page, sidebar, collectionName);
+      await expect(buildCommonLocators(runnerFrame).runner.runCollectionButton()).toBeEnabled();
+      await expect(buildCommonLocators(runnerFrame).runner.requestCountText()).toContainText('2');
+      await excludeRunnerTag(page, runnerFrame, tag);
+      return runnerFrame;
     });
 
     await test.step('Run and verify the tagged request is left out', async () => {

@@ -1169,7 +1169,9 @@ export async function closeEditorTab(page: Page, title: string): Promise<void> {
 export async function closeEditorTabIfOpen(page: Page, title: string): Promise<void> {
   const workbench = buildCommonLocators(page).workbench;
   const tab = workbench.editorTab(title);
-  if ((await tab.count()) === 0) return;
+  if ((await tab.count()) === 0) {
+    return;
+  }
   await tab.first().hover();
   await workbench.editorTabClose(title).first().click();
   await expect(tab).toHaveCount(0);
@@ -1248,7 +1250,7 @@ export async function openCollectionRunner(
   const menu = buildCommonLocators(sidebar);
   const row = menu.sidebar.collectionName(collectionName);
   await row.waitFor({ state: 'visible', timeout: 10_000 });
-  // The ellipse menu is visibility:hidden until the collection row is hovered.
+  // The ellipse menu is hidden until the collection row is hovered.
   await row.hover();
   await menu.sidebar.collectionMenuOptions(collectionName).click();
   await menu.sidebar.runCollectionButton().click();

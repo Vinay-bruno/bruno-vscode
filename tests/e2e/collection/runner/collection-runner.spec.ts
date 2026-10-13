@@ -1,6 +1,7 @@
 import { test, expect } from '../../utils/fixtures';
 import {
   addRequestTag,
+  closeEditorTabIfOpen,
   createCollection,
   createRequestByType,
   excludeRunnerTag,
@@ -10,7 +11,6 @@ import {
   runCollection,
 } from '../../utils/page/actions';
 import { buildCommonLocators } from '../../utils/page/locators';
-import type { Frame } from '@playwright/test';
 
 const TEST_SERVER = 'http://127.0.0.1:8081';
 
@@ -21,7 +21,6 @@ test.describe('Collection runner', () => {
     const collectionName = 'Runner Collection';
     const requestName = 'Ping';
     const locators = buildCommonLocators(sidebar);
-    let runner!: Frame;
 
     await test.step('Create a collection with one request', async () => {
       await createCollection(page, sidebar, collectionName, tmpDir);
@@ -33,21 +32,21 @@ test.describe('Collection runner', () => {
       await expect(locators.sidebar.collectionItem(requestName)).toBeVisible();
     });
 
-    await test.step('Open the runner from the collection ellipse menu', async () => {
-      runner = await openCollectionRunner(page, sidebar, collectionName);
-      await expect(buildCommonLocators(runner).runner.requestCount()).toContainText('1');
+    const runner = await test.step('Open the runner from the collection ellipse menu', async () => {
+      const opened = await openCollectionRunner(page, sidebar, collectionName);
+      await expect(buildCommonLocators(opened).runner.runCollectionButton()).toBeEnabled();
+      await expect(buildCommonLocators(opened).runner.requestCountText()).toContainText('1');
+      return opened;
     });
 
     await test.step('Run the collection and verify the request passed', async () => {
       const runnerLocators = buildCommonLocators(runner).runner;
-
       await runCollection(runner);
-
-      await expect(runnerLocators.result(requestName)).toBeVisible();
-      await expect(runnerLocators.result(requestName)).toContainText('200');
-      await expect(runnerLocators.filter('All')).toContainText('1');
-      await expect(runnerLocators.filter('Passed')).toContainText('1');
-      await expect(runnerLocators.filter('Failed')).toContainText('0');
+      await expect(runnerLocators.resultDisplay(requestName)).toBeVisible();
+      await expect(runnerLocators.resultDisplay(requestName)).toContainText('200');
+      await expect(runnerLocators.filterButton('All')).toContainText('1');
+      await expect(runnerLocators.filterButton('Passed')).toContainText('1');
+      await expect(runnerLocators.filterButton('Failed')).toContainText('0');
     });
   });
 
@@ -59,7 +58,6 @@ test.describe('Collection runner', () => {
     // The runner waits this long before each request, so two requests take at least twice that.
     const delayMs = 2000;
     const locators = buildCommonLocators(sidebar);
-    let runner!: Frame;
 
     await test.step('Create a collection with two requests', async () => {
       await createCollection(page, sidebar, collectionName, tmpDir);
@@ -67,6 +65,7 @@ test.describe('Collection runner', () => {
         name: firstRequest,
         url: `${TEST_SERVER}/ping`,
       });
+      await closeEditorTabIfOpen(page, firstRequest);
       await createRequestByType(page, sidebar, collectionName, {
         name: secondRequest,
         url: `${TEST_SERVER}/ping`,
@@ -75,12 +74,14 @@ test.describe('Collection runner', () => {
       await expect(locators.sidebar.collectionItem(secondRequest)).toBeVisible();
     });
 
-    await test.step('Open the runner and set the delay', async () => {
-      runner = await openCollectionRunner(page, sidebar, collectionName);
-      const runnerLocators = buildCommonLocators(runner).runner;
-      await expect(runnerLocators.requestCount()).toContainText('2');
+    const runner = await test.step('Open the runner and set the delay', async () => {
+      const opened = await openCollectionRunner(page, sidebar, collectionName);
+      const runnerLocators = buildCommonLocators(opened).runner;
+      await expect(runnerLocators.runCollectionButton()).toBeEnabled();
+      await expect(runnerLocators.requestCountText()).toContainText('2');
       await runnerLocators.delayInput().fill(String(delayMs));
       await expect(runnerLocators.delayInput()).toHaveValue(String(delayMs));
+      return opened;
     });
 
     await test.step('Run the collection and verify the delay is applied', async () => {
@@ -89,12 +90,13 @@ test.describe('Collection runner', () => {
 
       await runCollection(runner);
 
+      // The runner pauses delayMs before each request, so two requests take at least delayMs * 2.
       expect(Date.now() - startedAt).toBeGreaterThanOrEqual(delayMs * 2);
-      await expect(runnerLocators.result(firstRequest)).toContainText(firstRequest);
-      await expect(runnerLocators.result(secondRequest)).toContainText(secondRequest);
-      await expect(runnerLocators.filter('All')).toContainText('2');
-      await expect(runnerLocators.filter('Passed')).toContainText('2');
-      await expect(runnerLocators.filter('Failed')).toContainText('0');
+      await expect(runnerLocators.resultDisplay(firstRequest)).toContainText(firstRequest);
+      await expect(runnerLocators.resultDisplay(secondRequest)).toContainText(secondRequest);
+      await expect(runnerLocators.filterButton('All')).toContainText('2');
+      await expect(runnerLocators.filterButton('Passed')).toContainText('2');
+      await expect(runnerLocators.filterButton('Failed')).toContainText('0');
     });
   });
 
@@ -105,7 +107,6 @@ test.describe('Collection runner', () => {
     const plainRequest = 'Plain Request';
     const tag = 'smoke';
     const locators = buildCommonLocators(sidebar);
-    let runner!: Frame;
 
     await test.step('Create a collection with two requests and tag one of them', async () => {
       await createCollection(page, sidebar, collectionName, tmpDir);
@@ -113,19 +114,23 @@ test.describe('Collection runner', () => {
         name: taggedRequest,
         url: `${TEST_SERVER}/ping`,
       });
+      await closeEditorTabIfOpen(page, taggedRequest);
       await createRequestByType(page, sidebar, collectionName, {
         name: plainRequest,
         url: `${TEST_SERVER}/ping`,
       });
       await expect(locators.sidebar.collectionItem(taggedRequest)).toBeVisible();
       await expect(locators.sidebar.collectionItem(plainRequest)).toBeVisible();
+      await closeEditorTabIfOpen(page, plainRequest);
       await addRequestTag(page, sidebar, collectionName, taggedRequest, tag);
     });
 
-    await test.step('Open the runner and include the tag', async () => {
-      runner = await openCollectionRunner(page, sidebar, collectionName);
-      await expect(buildCommonLocators(runner).runner.requestCount()).toContainText('2');
-      await includeRunnerTag(page, runner, tag);
+    const runner = await test.step('Open the runner and include the tag', async () => {
+      const opened = await openCollectionRunner(page, sidebar, collectionName);
+      await expect(buildCommonLocators(opened).runner.runCollectionButton()).toBeEnabled();
+      await expect(buildCommonLocators(opened).runner.requestCountText()).toContainText('2');
+      await includeRunnerTag(page, opened, tag);
+      return opened;
     });
 
     await test.step('Run and verify only the tagged request is executed', async () => {
@@ -133,11 +138,11 @@ test.describe('Collection runner', () => {
 
       await runCollection(runner);
 
-      await expect(runnerLocators.result(taggedRequest)).toContainText(taggedRequest);
-      await expect(runnerLocators.result(plainRequest)).toHaveCount(0);
-      await expect(runnerLocators.filter('All')).toContainText('1');
-      await expect(runnerLocators.filter('Passed')).toContainText('1');
-      await expect(runnerLocators.filter('Failed')).toContainText('0');
+      await expect(runnerLocators.resultDisplay(taggedRequest)).toContainText(taggedRequest);
+      await expect(runnerLocators.resultDisplay(plainRequest)).toHaveCount(0);
+      await expect(runnerLocators.filterButton('All')).toContainText('1');
+      await expect(runnerLocators.filterButton('Passed')).toContainText('1');
+      await expect(runnerLocators.filterButton('Failed')).toContainText('0');
     });
   });
 
@@ -148,7 +153,6 @@ test.describe('Collection runner', () => {
     const plainRequest = 'Plain Request';
     const tag = 'smoke';
     const locators = buildCommonLocators(sidebar);
-    let runner!: Frame;
 
     await test.step('Create a collection with two requests and tag one of them', async () => {
       await createCollection(page, sidebar, collectionName, tmpDir);
@@ -156,19 +160,23 @@ test.describe('Collection runner', () => {
         name: taggedRequest,
         url: `${TEST_SERVER}/ping`,
       });
+      await closeEditorTabIfOpen(page, taggedRequest);
       await createRequestByType(page, sidebar, collectionName, {
         name: plainRequest,
         url: `${TEST_SERVER}/ping`,
       });
       await expect(locators.sidebar.collectionItem(taggedRequest)).toBeVisible();
       await expect(locators.sidebar.collectionItem(plainRequest)).toBeVisible();
+      await closeEditorTabIfOpen(page, plainRequest);
       await addRequestTag(page, sidebar, collectionName, taggedRequest, tag);
     });
 
-    await test.step('Open the runner and exclude the tag', async () => {
-      runner = await openCollectionRunner(page, sidebar, collectionName);
-      await expect(buildCommonLocators(runner).runner.requestCount()).toContainText('2');
-      await excludeRunnerTag(page, runner, tag);
+    const runner = await test.step('Open the runner and exclude the tag', async () => {
+      const opened = await openCollectionRunner(page, sidebar, collectionName);
+      await expect(buildCommonLocators(opened).runner.runCollectionButton()).toBeEnabled();
+      await expect(buildCommonLocators(opened).runner.requestCountText()).toContainText('2');
+      await excludeRunnerTag(page, opened, tag);
+      return opened;
     });
 
     await test.step('Run and verify the tagged request is left out', async () => {
@@ -176,11 +184,11 @@ test.describe('Collection runner', () => {
 
       await runCollection(runner);
 
-      await expect(runnerLocators.result(plainRequest)).toContainText(plainRequest);
-      await expect(runnerLocators.result(taggedRequest)).toHaveCount(0);
-      await expect(runnerLocators.filter('All')).toContainText('1');
-      await expect(runnerLocators.filter('Passed')).toContainText('1');
-      await expect(runnerLocators.filter('Failed')).toContainText('0');
+      await expect(runnerLocators.resultDisplay(plainRequest)).toContainText(plainRequest);
+      await expect(runnerLocators.resultDisplay(taggedRequest)).toHaveCount(0);
+      await expect(runnerLocators.filterButton('All')).toContainText('1');
+      await expect(runnerLocators.filterButton('Passed')).toContainText('1');
+      await expect(runnerLocators.filterButton('Failed')).toContainText('0');
     });
   });
 });

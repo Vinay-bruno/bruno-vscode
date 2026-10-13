@@ -207,7 +207,7 @@ export async function cloneCollection(
   const collectionRow = sidebarLocators.sidebar.collectionName(sourceName);
   await collectionRow.hover();
   await buildCommonLocators(collectionRow).sidebar.actionsMenu().click();
-  await sidebarLocators.sidebar.actionsItem('clone').click();
+  await sidebarLocators.sidebar.actionMenuButton('clone').click();
 
   const editor = await waitForNewWebviewFrame(page, sidebar);
   const cloneForm = buildCommonLocators(editor).cloneCollection;
@@ -1162,6 +1162,20 @@ export async function closeEditorTab(page: Page, title: string): Promise<void> {
 }
 
 /**
+ * Close an editor tab only when it is still open.
+ * Used after the first request when a test creates a second one, so the next
+ * New Request panel is not confused with the editor that just opened.
+ */
+export async function closeEditorTabIfOpen(page: Page, title: string): Promise<void> {
+  const workbench = buildCommonLocators(page).workbench;
+  const tab = workbench.editorTab(title);
+  if ((await tab.count()) === 0) return;
+  await tab.first().hover();
+  await workbench.editorTabClose(title).first().click();
+  await expect(tab).toHaveCount(0);
+}
+
+/**
  * Copy a request/folder to the in-app clipboard via its sidebar context menu.
  *
  * @param sidebar - The sidebar webview Frame
@@ -1224,7 +1238,7 @@ export async function runCommand(page: Page, command: string): Promise<void> {
 
 /**
  * Open the collection runner from the collection ellipse menu ("Run").
- * Returns the runner panel once Run Collection can be clicked.
+ * Returns the runner panel once the Run Collection button is visible.
  */
 export async function openCollectionRunner(
   page: Page,
@@ -1234,16 +1248,17 @@ export async function openCollectionRunner(
   const menu = buildCommonLocators(sidebar);
   const row = menu.sidebar.collectionName(collectionName);
   await row.waitFor({ state: 'visible', timeout: 10_000 });
+  // The ellipse menu is visibility:hidden until the collection row is hovered.
   await row.hover();
-  await menu.sidebar.collectionActions(collectionName).click();
-  await menu.sidebar.runMenuItem().click();
+  await menu.sidebar.collectionMenuOptions(collectionName).click();
+  await menu.sidebar.runCollectionButton().click();
 
   const runner = await getWebviewFrame(
     page,
-    (frame) => buildCommonLocators(frame).runner.runCollection(),
+    (frame) => buildCommonLocators(frame).runner.runCollectionButton(),
     sidebar
   );
-  await buildCommonLocators(runner).runner.runCollectionReady().waitFor({ state: 'visible', timeout: 20_000 });
+  await expect(buildCommonLocators(runner).runner.runCollectionButton()).toBeVisible({ timeout: 20_000 });
 
   return runner;
 }
@@ -1257,34 +1272,34 @@ async function typeRunnerTag(page: Page, frame: Frame, input: Locator, tag: stri
   await input.click();
   await page.keyboard.type(tag, { delay: 20 });
 
-  const suggestions = buildCommonLocators(frame).runner.tagSuggestions();
+  const suggestions = buildCommonLocators(frame).runner.tagSuggestionList();
   if (await suggestions.isVisible().catch(() => false)) {
     await page.keyboard.press('Escape');
     await suggestions.waitFor({ state: 'hidden', timeout: 5_000 });
   }
   await page.keyboard.press('Enter');
-  await buildCommonLocators(frame).runner.tagChip(tag).waitFor({ state: 'visible', timeout: 10_000 });
+  await buildCommonLocators(frame).runner.tagChipButton(tag).waitFor({ state: 'visible', timeout: 10_000 });
 }
 
 /** Turn on "Filter requests with tags" and add `tag` to Included tags. */
 export async function includeRunnerTag(page: Page, runner: Frame, tag: string): Promise<void> {
   const locators = buildCommonLocators(runner).runner;
-  await locators.filterByTags().click();
+  await locators.filterByTagsRadio().click();
   await typeRunnerTag(page, runner, locators.includeTagInput(), tag);
 }
 
 /** Turn on "Filter requests with tags" and add `tag` to Excluded tags. */
 export async function excludeRunnerTag(page: Page, runner: Frame, tag: string): Promise<void> {
   const locators = buildCommonLocators(runner).runner;
-  await locators.filterByTags().click();
+  await locators.filterByTagsRadio().click();
   await typeRunnerTag(page, runner, locators.excludeTagInput(), tag);
 }
 
 /** Click Run Collection and wait until the run finishes. */
 export async function runCollection(runner: Frame): Promise<void> {
   const locators = buildCommonLocators(runner).runner;
-  await locators.runCollection().click();
-  await locators.runAgain().waitFor({ state: 'visible', timeout: 30_000 });
+  await locators.runCollectionButton().click();
+  await locators.runAgainButton().waitFor({ state: 'visible', timeout: 30_000 });
 }
 
 /**
@@ -1299,10 +1314,14 @@ export async function addRequestTag(
   tag: string
 ): Promise<void> {
   const editor = await openRequest(page, sidebar, collectionName, requestName);
+  const tabs = buildCommonLocators(editor).tabs;
+  // The editor can still be swapping from the previously open request. Wait until
+  // Settings or its overflow control is actually there before clicking.
+  await expect(tabs.byText('Settings').or(tabs.more()).first()).toBeVisible({ timeout: 15_000 });
   await openRequestPaneTab(editor, 'Settings');
 
   const locators = buildCommonLocators(editor).runner;
   await typeRunnerTag(page, editor, locators.requestTagInput(), tag);
   await runCommand(page, 'Bruno: Save Request');
-  await locators.savedToast().waitFor({ state: 'visible', timeout: 10_000 });
+  await locators.savedToastText().waitFor({ state: 'visible', timeout: 10_000 });
 }

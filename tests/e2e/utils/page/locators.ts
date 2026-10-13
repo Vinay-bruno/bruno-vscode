@@ -23,10 +23,10 @@ export const buildCommonLocators = (frame: FrameLike) => ({
     addMenuCreate: () => frame.getByTestId('collections-header-add-menu-create'),
     addMenuImport: () => frame.getByTestId('collections-header-add-menu-import'),
     actionsMenu: () => frame.getByTestId('collection-actions'),
-    actionsItem: (id: string) => frame.getByTestId(`collection-actions-${id}`),
-    collectionActions: (name: string) =>
+    actionMenuButton: (id: string) => frame.getByTestId(`collection-actions-${id}`),
+    collectionMenuOptions: (name: string) =>
       frame.getByTestId('sidebar-collection-row').filter({ hasText: name }).getByTestId('collection-actions'),
-    runMenuItem: () => frame.getByTestId('collection-actions-run')
+    runCollectionButton: () => frame.getByTestId('collection-actions-run')
   },
   importCollection: {
     container: () => frame.getByTestId('import-collection-container'),
@@ -247,12 +247,10 @@ export const buildCommonLocators = (frame: FrameLike) => ({
     errorMessage: () => frame.locator('.ws-message.ws-error .message-content')
   },
    runner: {
-    runCollection: () => frame.getByRole('button', { name: 'Run Collection' }),
-    // Enabled only — the button is visible but disabled while requests are still loading.
-    runCollectionReady: () => frame.getByRole('button', { name: 'Run Collection', disabled: false }),
-    runAgain: () => frame.getByRole('button', { name: 'Run Again' }),
+    runCollectionButton: () => frame.getByRole('button', { name: 'Run Collection' }),
+    runAgainButton: () => frame.getByRole('button', { name: 'Run Again' }),
     delayInput: () => frame.getByRole('spinbutton'),
-    filterByTags: () => frame.getByLabel('Filter requests with tags'),
+    filterByTagsRadio: () => frame.getByLabel('Filter requests with tags'),
     // Both fields share data-testid="tag-input". Scope each one to its label so the id resolves to one element.
     includeTagInput: () =>
       frame.getByText('Included tags:', { exact: true }).locator('..').getByTestId('tag-input'),
@@ -261,13 +259,13 @@ export const buildCommonLocators = (frame: FrameLike) => ({
     // Request Settings has a single tag field, so the id is unique there.
     requestTagInput: () => frame.getByTestId('tag-input'),
     // CodeMirror's hint list has no role or test id.
-    tagSuggestions: () => frame.locator('.CodeMirror-hints'),
-    tagChip: (tag: string) => frame.getByRole('button', { name: tag }),
-    savedToast: () => frame.getByText('Request saved successfully'),
-    requestCount: () => frame.getByText(/requests in this collection/),
-    // Result row has no test id; the name and status sit together in this block.
-    result: (name: string) => frame.locator('.item-path').filter({ hasText: name }),
-    filter: (label: 'All' | 'Passed' | 'Failed' | 'Skipped') =>
+    tagSuggestionList: () => frame.locator('.CodeMirror-hints'),
+    tagChipButton: (tag: string) => frame.getByRole('button', { name: tag }),
+    savedToastText: () => frame.getByText('Request saved successfully'),
+    requestCountText: () => frame.getByText(/requests in this collection/),
+    // Result block has no test id; the name and status sit together in this display.
+    resultDisplay: (name: string) => frame.locator('.item-path').filter({ hasText: name }),
+    filterButton: (label: 'All' | 'Passed' | 'Failed' | 'Skipped') =>
       frame.getByRole('button', { name: label })
   }
 });
